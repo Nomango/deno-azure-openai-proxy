@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.181.0/http/server.ts";
 import { pooledMap } from "https://deno.land/std@0.182.0/async/pool.ts";
+import { OpenAIStream, StreamingTextResponse } from "https://esm.sh/ai@^2.2";
 
 // The name of your Azure OpenAI Resource.
 const resourceName: string = Deno.env.get("RESOURCE_NAME");
@@ -78,60 +79,16 @@ async function handleDirect(request: Request, path: string) {
     path,
     key
   );
-  if (body?.stream != true) {
+  if (body?.stream !== true) {
     return response;
   }
-  if (response.body) {
-    const { readable, writable } = new TransformStream();
-    stream(response.body, writable);
-    return new Response(readable, response);
-  } else {
-    throw new Error("Response body is null");
-  }
+
+  const stream = OpenAIStream(response);
+  return new StreamingTextResponse(stream);
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// support printer mode and add newline
-async function stream(
-  readable: ReadableStream<Uint8Array>,
-  writable: WritableStream<Uint8Array>
-): Promise<void> {
-  const reader = readable.getReader();
-  const writer = writable.getWriter();
-
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
-  const newline = "\n";
-  const delimiter = "\n\n";
-  const encodedNewline = encoder.encode(newline);
-
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true }); // stream: true is important here,fix the bug of incomplete line
-    const lines = buffer.split(delimiter);
-
-    // Loop through all but the last line, which may be incomplete.
-    for (let i = 0; i < lines.length - 1; i++) {
-      await writer.write(encoder.encode(lines[i] + delimiter));
-      await sleep(20);
-    }
-
-    buffer = lines[lines.length - 1];
-  }
-
-  if (buffer) {
-    await writer.write(encoder.encode(buffer));
-  }
-  await writer.write(encodedNewline);
-  await writer.close();
 }
 
 async function extractRequest(request: Request) {
