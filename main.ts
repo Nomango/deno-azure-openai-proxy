@@ -67,57 +67,17 @@ async function requestAzure(method: string, body: any, path: string, authKey?: s
 async function handleDirect(request: Request, path: string) {
   const [key, body] = await extractRequest(request);
   const response: Response = await requestAzure(request.method, body, path, key);
-  if (body?.stream != true){
-    return response
-  } 
-  if (response.body) {
-      const { readable, writable } = new TransformStream();
-      stream(response.body, writable);
-      return new Response(readable, response);
-  } else {
-      throw new Error('Response body is null');
-  }
-}
+  // to prevent browser prompt for credentials
+  const newHeaders = new Headers(response.headers);
+  newHeaders.delete("www-authenticate");
+  // to disable nginx buffering
+  newHeaders.set("X-Accel-Buffering", "no");
 
-function sleep(ms:number):Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// support printer mode and add newline
-async function stream(readable:ReadableStream<Uint8Array>, writable:WritableStream<Uint8Array>):Promise<void> {
-  const reader = readable.getReader();
-  const writer = writable.getWriter();
-
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
-  const newline = "\n";
-  const delimiter = "\n\n";
-  const encodedNewline = encoder.encode(newline);
-
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true }); // stream: true is important here,fix the bug of incomplete line
-    const lines = buffer.split(delimiter);
-
-    // Loop through all but the last line, which may be incomplete.
-    for (let i = 0; i < lines.length - 1; i++) {
-      await writer.write(encoder.encode(lines[i] + delimiter));
-      await sleep(20);
-    }
-
-    buffer = lines[lines.length - 1];
-  }
-
-  if (buffer) {
-    await writer.write(encoder.encode(buffer));
-  }
-  await writer.write(encodedNewline)
-  await writer.close();
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
 }
 
 async function extractRequest(request: Request) {
